@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -40,6 +40,7 @@ type Transaction struct {
 type Condition struct {
 	Operator   string      `json:"operator"` // "field", "and", "or", "not"
 	Field      string      `json:"field,omitempty"`
+	Comparison string      `json:"comparison,omitempty"` // "eq", "neq", "gt", etc.
 	Value      interface{} `json:"value,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
 }
@@ -75,6 +76,17 @@ type distinctTracker struct {
 	values map[interface{}]struct{}
 }
 
+type CardStats struct {
+	CardNumber        string                 `json:"card_number"`
+	Sum               float64                `json:"sum"`
+	Count             int                    `json:"count"`
+	Avg               float64                `json:"avg"`
+	Min               float64                `json:"min"`
+	Max               float64                `json:"max"`
+	DistinctMerchants int                    `json:"distinct_merchants"`
+	// Additional        map[string]interface{} `json:"additional"` // For dynamic fields
+}
+
 // Aggregator manages all dynamic aggregations
 type Aggregator struct {
 	rules    map[string]*AggregationStats
@@ -82,6 +94,8 @@ type Aggregator struct {
 	shutdown chan struct{}
 	wg       sync.WaitGroup
 	config   []AggregationRule
+	cardStats   map[string]*CardStats
+	cardStatsMu sync.RWMutex
 }
 
 func NewAggregator(configFile string) (*Aggregator, error) {
@@ -95,6 +109,7 @@ func NewAggregator(configFile string) (*Aggregator, error) {
 		queue:    make(chan Transaction, QueueSize),
 		shutdown: make(chan struct{}),
 		config:   config,
+		cardStats: make(map[string]*CardStats),
 	}
 
 	for _, rule := range config {
@@ -119,7 +134,7 @@ func loadConfig(filename string) ([]AggregationRule, error) {
 	}
 	defer file.Close()
 
-	bytes, err := ioutil.ReadAll(file)
+	bytes, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +173,8 @@ func getFieldValue(t Transaction, field string) interface{} {
 	}
 }
 
-func compareValues(fieldValue interface{}, operator string, conditionValue interface{}) bool {
-	switch operator {
+func compareValues(fieldValue interface{}, comparison string, conditionValue interface{}) bool {
+	switch comparison {
 	case "eq":
 		return fieldValue == conditionValue
 	case "neq":
@@ -223,7 +238,7 @@ func evaluateCondition(t Transaction, cond Condition) bool {
 	switch cond.Operator {
 	case "field":
 		fieldValue := getFieldValue(t, cond.Field)
-		return compareValues(fieldValue, cond.Operator, cond.Value)
+		return compareValues(fieldValue, cond.Comparison, cond.Value)
 	case "and":
 		for _, c := range cond.Conditions {
 			if !evaluateCondition(t, c) {
@@ -240,6 +255,7 @@ func evaluateCondition(t Transaction, cond Condition) bool {
 		return len(cond.Conditions) == 0
 	case "not":
 		return !evaluateCondition(t, cond.Conditions[0])
+
 	default:
 		return false
 	}
@@ -259,6 +275,7 @@ func (a *Aggregator) worker() {
 }
 
 func (a *Aggregator) processTransaction(t Transaction) {
+	matchedCardRule := false
 	for _, rule := range a.config {
 		if !evaluateCondition(t, rule.Condition) {
 			continue
@@ -333,6 +350,36 @@ func (a *Aggregator) processTransaction(t Transaction) {
 			current.values[aggValue] = struct{}{}
 			stats.Results[groupKey] = current
 		}
+
+			// If this rule groups by card_number, mark for per-card aggregation
+			if rule.GroupBy == "card_number" && groupKey == t.CardNumber {
+				matchedCardRule = true
+			}
+	}
+
+	
+	if matchedCardRule {
+		a.cardStatsMu.Lock()
+		defer a.cardStatsMu.Unlock()
+		cs, exists := a.cardStats[t.CardNumber]
+		if !exists {
+			cs = &CardStats{
+				CardNumber: t.CardNumber,
+				Min:        t.Amount,
+				Max:        t.Amount,
+			}
+			a.cardStats[t.CardNumber] = cs
+		}
+		cs.Sum += t.Amount
+		cs.Count++
+		if t.Amount < cs.Min {
+			cs.Min = t.Amount
+		}
+		if t.Amount > cs.Max {
+			cs.Max = t.Amount
+		}
+		cs.Avg = cs.Sum / float64(cs.Count)
+		cs.DistinctMerchants = 1
 	}
 }
 
@@ -403,6 +450,24 @@ func (a *Aggregator) GetAllRules() []AggregationRule {
 	return a.config
 }
 
+func (a *Aggregator) GetAllCardStats() []CardStats {
+	a.cardStatsMu.RLock()
+	defer a.cardStatsMu.RUnlock()
+	stats := make([]CardStats, 0, len(a.cardStats))
+	for _, cs := range a.cardStats {
+		stats = append(stats, *cs)
+	}
+	return stats
+}
+
+func (a *Aggregator) GetCardStats(cardID string) (*CardStats, bool) {
+	a.cardStatsMu.RLock()
+	defer a.cardStatsMu.RUnlock()
+	cs, exists := a.cardStats[cardID]
+	return cs, exists
+}
+
+
 func (a *Aggregator) Shutdown() {
 	close(a.shutdown)
 	a.wg.Wait()
@@ -471,6 +536,35 @@ func (s *Server) handleGetRules(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rules)
 }
 
+func (s *Server) handleGetAllCardStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	stats := s.aggregator.GetAllCardStats()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (s *Server) handleGetCardStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cardID := r.URL.Query().Get("card_id")
+	if cardID == "" {
+		http.Error(w, "Missing card_id parameter", http.StatusBadRequest)
+		return
+	}
+	cs, exists := s.aggregator.GetCardStats(cardID)
+	if !exists {
+		http.Error(w, "Card not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cs)
+}
+
 func main() {
 
 	// Banner
@@ -502,6 +596,8 @@ func main() {
 	http.HandleFunc("/transaction", server.handleTransaction)
 	http.HandleFunc("/results", server.handleGetResults)
 	http.HandleFunc("/rules", server.handleGetRules)
+	http.HandleFunc("/card_aggs", server.handleGetAllCardStats)
+	http.HandleFunc("/card_stats", server.handleGetCardStats)
 
 	log.Printf("Server starting with dynamic aggregation rules")
 	log.Fatal(srv.ListenAndServe())
