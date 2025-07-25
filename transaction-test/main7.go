@@ -9,6 +9,9 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/dimiro1/banner"
+	"github.com/fatih/color"
 )
 
 // Configuration constants
@@ -469,6 +472,18 @@ func (s *Server) handleGetRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+
+	// Banner
+	c := color.New(color.FgCyan).Add(color.Underline)
+	file, err := os.Open("banner.txt")
+	if err != nil {
+		log.Fatalf("Failed to open banner file: %v", err)
+	}
+	defer file.Close()
+
+	banner.Init(os.Stdout, true, true, file)
+	c.Println("Prints cyan text with an underline.")
+
 	aggregator, err := NewAggregator(ConfigFile)
 	if err != nil {
 		log.Fatalf("Failed to initialize aggregator: %v", err)
