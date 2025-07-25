@@ -1,0 +1,101 @@
+[
+    {
+      "name": "high_value_or_international",
+      "group_by": "card_number",
+      "agg_type": "sum",
+      "agg_field": "amount",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "field",
+                "field": "amount",
+                "value": 1000,
+                "operator": "gt"
+              },
+              {
+                "operator": "field",
+                "field": "status",
+                "value": "approved",
+                "operator": "eq"
+              }
+            ]
+          },
+          {
+            "operator": "field",
+            "field": "terminal_type",
+            "value": "99",
+            "operator": "eq"
+          }
+        ]
+      },
+      "description": "Sum of high-value OR international transactions"
+    },
+    {
+      "name": "fraud_suspect",
+      "group_by": "merchant_id",
+      "agg_type": "count",
+      "agg_field": "",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "not",
+            "conditions": [
+              {
+                "operator": "field",
+                "field": "status",
+                "value": "approved",
+                "operator": "eq"
+              }
+            ]
+          },
+          {
+            "operator": "or",
+            "conditions": [
+              {
+                "operator": "field",
+                "field": "amount",
+                "value": 5000,
+                "operator": "gt"
+              },
+              {
+                "operator": "field",
+                "field": "mti",
+                "value": "0100",
+                "operator": "eq"
+              }
+            ]
+          }
+        ]
+      },
+      "description": "Count of potentially fraudulent transactions"
+    },
+    {
+      "name": "weekend_premium",
+      "group_by": "card_number",
+      "agg_type": "avg",
+      "agg_field": "amount",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "field",
+            "field": "timestamp",
+            "value": "SA",
+            "operator": "contains"
+          },
+          {
+            "operator": "field",
+            "field": "amount",
+            "value": 100,
+            "operator": "gt"
+          }
+        ]
+      },
+      "description": "Average of premium weekend transactions"
+    }
+  ]

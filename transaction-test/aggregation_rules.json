@@ -1,0 +1,68 @@
+[
+    {
+      "name": "sum_amount_by_card_number",
+      "group_by": "card_number",
+      "agg_type": "sum",
+      "agg_field": "amount",
+      "conditions": [
+        {
+          "field": "transaction_type",
+          "operator": "eq",
+          "value": "01"
+        },
+        {
+          "field": "terminal_type",
+          "operator": "eq",
+          "value": "14"
+        },
+        {
+            "field": "mti",
+            "operator": "eq",
+            "value": "200"
+          }
+      ],
+      "description": "Sum of amount by card number"
+    },
+    {
+      "name": "count_transactions_by_card_number",
+      "group_by": "merchant_id",
+      "agg_type": "count",
+      "agg_field": "",
+      "conditions": [
+        {
+          "field": "mti",
+          "operator": "eq",
+          "value": "200"
+        }
+      ],
+      "description": "Count of transactions by card number"
+    },
+    {
+      "name": "avg_transaction_by_card_type",
+      "group_by": "type",
+      "agg_type": "avg",
+      "agg_field": "amount",
+      "conditions": [
+        {
+          "field": "status",
+          "operator": "eq",
+          "value": "approved"
+        }
+      ],
+      "description": "Average transaction amount by card type"
+    },
+    {
+      "name": "unique_terminals_per_merchant",
+      "group_by": "merchant_id",
+      "agg_type": "distinct_count",
+      "agg_field": "terminal_id",
+      "conditions": [
+        {
+          "field": "timestamp",
+          "operator": "gte",
+          "value": "2023-01-01"
+        }
+      ],
+      "description": "Count of unique terminals used per merchant"
+    }
+  ]
