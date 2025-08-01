@@ -1,0 +1,57 @@
+[
+    {
+      "name": "hourly_transactions",
+      "group_by": "card_number",
+      "agg_type": "sum",
+      "agg_field": "amount",
+      "condition": {
+        "operator": "field",
+        "field": "status",
+        "comparison": "eq",
+        "value": "approved"
+      },
+      "window_type": "tumbling",
+      "window": {
+        "duration": "1h",
+        "start_time": "2023-01-01T00:00:00Z"
+      },
+      "description": "Hourly sum of approved transactions by card"
+    },
+    {
+      "name": "last_24h_fraud",
+      "group_by": "merchant_id",
+      "agg_type": "count",
+      "agg_field": "",
+      "condition": {
+        "operator": "field",
+        "field": "status",
+        "comparison": "eq",
+        "value": "declined"
+      },
+      "window_type": "sliding",
+      "window": {
+        "duration": "24h",
+        "slide": "1h",
+        "start_time": "2023-01-01T00:00:00Z"
+      },
+      "description": "Count of declined transactions in sliding 24h window"
+    },
+    {
+      "name": "session_collector",
+      "group_by": "card_number",
+      "agg_type": "avg",
+      "agg_field": "amount",
+      "condition": {
+        "operator": "field",
+        "field": "terminal_type",
+        "comparison": "eq",
+        "value": "14"
+      },
+      "window_type": "collector",
+      "window": {
+        "duration": "4h",
+        "start_time": "2023-01-01T00:00:00Z"
+      },
+      "description": "Average transaction amount during session (max 4h)"
+    }
+  ]
